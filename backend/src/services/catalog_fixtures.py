@@ -29,6 +29,21 @@ ID_CHECK_CHARS = "10X98765432"
 
 ROW_COUNT = 300
 
+# --------------------------------------------------------- 上游表结构漂移 ----
+# 模拟上游会员主档的真实变更：新增退货金额列、旧客户编号列下线。
+# 作用于 sample 物理表（真实上游形态），目录侧保持旧结构，等采集任务识别 added/missing。
+# 这是有意为之的"目录滞后于上游"场景：seed 只造物理表，变化由两阶段采集捕获。
+UPSTREAM_DRIFT: dict[str, dict[str, Any]] = {
+    "ods_crm_customer": {
+        # 上游已删除的旧列（目录里 customer_id 仍在册，采集后软标记 missing）
+        "drop_columns": ["customer_id"],
+        # 上游新增列（目录里没有，采集后建档进入检索）
+        "add_columns": [("refund_amount", "numeric(12,2)")],
+        # 行数据改写：与新增列对齐（旧列值丢弃）
+        "row_builder": "_build_crm_customer_rows",
+    },
+}
+
 
 def make_phone(rng: random.Random) -> str:
     return f"{rng.choice(PHONE_PREFIXES)}{rng.randint(10000000, 99999999)}"
@@ -159,6 +174,7 @@ REAL_TABLES: list[dict[str, Any]] = [
 
 
 def _build_crm_customer_rows(rng: random.Random) -> list[list[Any]]:
+    """漂移后的会员主档：旧 customer_id 已下线，新增 refund_amount 退货金额。"""
     rows: list[list[Any]] = []
     for index in range(ROW_COUNT):
         phone = make_phone(rng)
@@ -168,9 +184,9 @@ def _build_crm_customer_rows(rng: random.Random) -> list[list[Any]]:
         email = None if index in (5, 23, 61, 99, 140, 210) else make_email(rng, index, "cust")
         id_card = None if index in (44, 177) else make_id_card(rng, index)
         register = date(2025, 1, 1) + timedelta(days=index % 420)
+        refund = None if index % 9 == 7 else make_amount(rng, 800.0)
         rows.append(
             [
-                f"C{100000 + index}",
                 make_name(rng),
                 mobile,
                 email,
@@ -180,6 +196,7 @@ def _build_crm_customer_rows(rng: random.Random) -> list[list[Any]]:
                 MEMBER_LEVELS[index % len(MEMBER_LEVELS)],
                 make_amount(rng, 12000.0, thousands=(index % 7 == 0)),
                 datetime(2026, 11, 9, 8 + index % 10, index % 60, 0),
+                refund,
             ]
         )
     return rows
@@ -246,7 +263,11 @@ def _build_member_profile_rows(rng: random.Random) -> list[list[Any]]:
 
 
 def build_sample_tables() -> dict[str, dict[str, Any]]:
-    """5 张真实样例表：DDL 列 + 300 行数据，写入 DB schema `sample`。"""
+    """5 张真实样例表：DDL 列 + 300 行数据，写入 DB schema `sample`。
+
+    对 UPSTREAM_DRIFT 声明的表，物理表按"上游当前形态"建（删旧列、加新列），
+    目录仍保留 REAL_TABLES 的旧结构 —— 差异交给两阶段采集识别。
+    """
     rng = random.Random(55601)
     tables = {
         "ods_crm_customer": _build_crm_customer_rows(rng),
@@ -258,11 +279,19 @@ def build_sample_tables() -> dict[str, dict[str, Any]]:
     payload: dict[str, dict[str, Any]] = {}
     for table in REAL_TABLES:
         name = table["table_name"]
+        ddl_columns = list(table["columns"])
+        drift = UPSTREAM_DRIFT.get(name)
+        if drift:
+            dropped = set(drift["drop_columns"])
+            ddl_columns = [
+                (col, sql_type) for col, sql_type in ddl_columns if col not in dropped
+            ]
+            ddl_columns.extend(drift["add_columns"])
         payload[name] = {
             # ODS 原始表把金额列存成文本（含 ¥/千分位），列目录里声明为 numeric 是业务口径
             "columns": [
                 {"name": col, "sql_type": "text" if sql_type.startswith("numeric") else sql_type}
-                for col, sql_type in table["columns"]
+                for col, sql_type in ddl_columns
             ],
             "rows": tables[name],
         }

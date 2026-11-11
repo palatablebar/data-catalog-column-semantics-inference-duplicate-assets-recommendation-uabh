@@ -72,6 +72,22 @@ export const PAIR_STATUS_LABELS: Record<string, string> = {
   merged: '已合并',
 }
 
+export const COLUMN_SYNC_STATUS_LABELS: Record<string, string> = {
+  active: '在册',
+  missing: '上游缺失',
+}
+
+export const COLUMN_CHANGE_LABELS: Record<string, string> = {
+  added: '新增',
+  missing: '缺失',
+  unchanged: '无变化',
+}
+
+export const TABLE_READ_STATUS_LABELS: Record<string, string> = {
+  readable: '可读取',
+  unreadable: '未读取',
+}
+
 export const VERDICT_LABELS: Record<string, string> = {
   identical_copy: '完全复制',
   likely_duplicate: '高度疑似重复',

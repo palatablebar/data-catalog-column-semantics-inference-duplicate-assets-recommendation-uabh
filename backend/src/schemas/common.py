@@ -40,6 +40,8 @@ def column_brief(column) -> dict[str, Any]:
         "inferred_type": column.inferred_type,
         "confidence": round(column.confidence or 0.0, 3),
         "inference_source": column.inference_source,
+        "sync_status": column.sync_status,
+        "detected_change": column.detected_change,
     }
 
 

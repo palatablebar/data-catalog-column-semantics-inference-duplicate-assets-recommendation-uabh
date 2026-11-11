@@ -24,8 +24,8 @@
 2. **列语义推断校验** `/columns`：6 类正则 + 列名词典 + 基数/空值特征加权，展示证据（命中样本前 3）与置信度；支持人工纠正（记录 `manual` 来源）。
 3. **相似表推荐** `/duplicates`：MinHash k=128 + 16 带×8 行 LSH 候选 → 精确 Jaccard + 列名结构相似；并排列级 diff + 合并建议（下线表 / 保留列并集）。
 4. **标签与敏感列** `/tags`：manual/inferred 双来源标签；viewer 可批量补打 `sensitive:high`。
-5. **采集任务** `/ingest`：Celery worker 读取 `sample` schema 的 5 张样例表（各 300 行），逐列统计落库；任务状态可轮询。
-6. **导出目录 CSV**：`GET /api/assets/export.csv`，含资产 / 列 / 推断类型 / 标签。
+5. **采集任务（两阶段）** `/ingest`：Celery worker 读取 `sample` schema 的 5 张样例表（各 300 行）。**先快照形成五张表的列变化（added/missing/unchanged）与每表失败原因，整批可读后才在单事务内替换目录；任一表读不到则任务 failed、目录保留上一版**。缺失列软标记（`sync_status=missing`，不物理删除，人工纠正/标签/证据保留），新增列建档采样进入检索；重复运行无新变化（幂等）。
+6. **导出目录 CSV**：`GET /api/assets/export.csv`，含资产 / 列 / 推断类型 / 标签 / 采集状态。
 
 ## 两个核心算法（Python 真算，结果落库，前端只展示）
 
@@ -48,6 +48,20 @@
 - **score = 0.7×jaccard + 0.3×结构相似** → top N（默认 6）落库。
 - 合并建议：下线列少/行少的一方，保留列并集、`extra_in_drop`、`missing_in_drop`、动作清单。
 - 失败态：列 < 2 的表不参与；人工 `dismissed` 的对不再出现在推荐列表。
+
+### C. 两阶段采集与列变化（`worker/src/tasks/ingest_task.py` + `worker/src/core/catalog_sync.py`）
+
+解决"上游加列/删列后目录不跟随、单表读不到却显示完成、人工纠正被覆盖"。
+
+- **阶段 1 快照（只读，不碰目录）**：对 5 张样例表取行数 + `information_schema` 列结构，与上一版目录做集合差异，逐表产出 `added / missing / unchanged` 与 `failure_reason`（`worker/src/core/catalog_sync.py` 纯函数）。
+- **整批门禁**：任一表 `unreadable`（缺表/权限/空表）→ 任务 `failed`，错误码 `CATMAP-4001`，报告照常落 `job.stats.table_reports`，**目录一行不改，保留上一版**。
+- **阶段 2 单事务替换（全成功才提交）**：SAVEPOINT 隔离目录写入，异常只回滚目录、任务持久化 `failed`。
+  - `added`：新建 `AssetColumn` 并立即采样，进入检索目录；`detected_change=added`。
+  - `missing`：**软标记 `sync_status=missing`，物理保留**——人工纠正（manual）、标签、证据、样例均不丢；列卡片置灰划线。
+  - `unchanged`：重新采样，推断结果/人工纠正原样保留；曾缺失又回归的列在此复活为 `active`。
+- **幂等**：`detected_change` 只表达"本次新发现的变化"，每轮先清零再按动作打标；`mark_missing` 仅对当前 `active` 的列下发。重复运行无新变化，不新增标记。
+- **演示漂移**：seed 的 `UPSTREAM_DRIFT` 让会员主档 `ods_crm_customer` 物理表新增 `refund_amount`（退货金额）、下线 `customer_id`（客户编号），目录侧保持旧结构，跑一次采集即可看到 added/missing。
+- **纯逻辑测试（无需 DB）**：`python3 -I worker/tests/test_catalog_sync.py`，覆盖漂移识别、软保留、幂等、失败阻断、列回归。
 
 ## 快速启动
 
@@ -111,8 +125,11 @@ gb-556/
 │       ├── schemas/  controllers/  routes/
 │       ├── services/{typing_engine,similarity_engine,catalog_fixtures,...}.py
 │       ├── utils/{jwt,password,errors,pagination,formatters,redis_client}.py
-│       └── migrations/versions/0001_initial.py
-├── worker/                     # Celery worker（采样 + 列统计 + 心跳）
+│       └── migrations/versions/0001_initial.py · 0002_column_sync_status.py
+├── worker/                     # Celery worker（两阶段采集 + 采样 + 心跳）
+│   ├── src/core/{sampler,catalog_sync}.py   # catalog_sync = 列变化/动作规划纯函数
+│   ├── src/tasks/ingest_task.py             # 阶段1 快照门禁 → 阶段2 单事务替换
+│   └── tests/test_catalog_sync.py           # 纯逻辑测试（python3 -I 直接跑，无需 DB）
 └── frontend/src/{api,stores,types,components/common,components/catalog,hooks,pages,router,utils,constants,styles}
 ```
 
@@ -138,7 +155,7 @@ gb-556/
 - **组 2 `Role`（admin/analyst/viewer）**
   - 后端：`backend/src/constants/roles.py`、`constants/enums.py`、`middlewares/rbac.py`、`scripts/seed_demo.py`
   - 前端：`frontend/src/constants/enums.ts`、`types/models.ts`、`utils/permission.ts`、`components/common/RoleBadge.vue`、`pages/LoginPage.vue`
-- 其它枚举：`AssetLayer`（ods/dwd/dws/ads）、`IngestJobStatus`（queued/running/completed/failed）、`PairStatus`（recommended/dismissed/merged）、`TagSource`（manual/inferred）、`TagCategory`（pii/business/governance）、`InferenceSource`（auto/manual）——后端 `constants/enums.py` 与前端 `constants/enums.ts` 各一份。
+- 其它枚举：`AssetLayer`（ods/dwd/dws/ads）、`IngestJobStatus`（queued/running/completed/failed）、`PairStatus`（recommended/dismissed/merged）、`TagSource`（manual/inferred）、`TagCategory`（pii/business/governance）、`InferenceSource`（auto/manual）、`ColumnSyncStatus`（active/missing）、`ColumnChangeType`（added/missing/unchanged）、`TableReadStatus`（readable/unreadable）——后端 `constants/enums.py` 与前端 `constants/enums.ts` 各一份。
 
 ## Docker 说明
 

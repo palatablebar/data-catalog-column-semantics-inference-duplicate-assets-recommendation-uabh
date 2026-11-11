@@ -92,6 +92,9 @@
               <span>{{ asset.domain }}</span>
               <span>{{ asset.column_count }} 列</span>
               <span>{{ formatNumber(asset.row_count) }} 行</span>
+              <span v-if="asset.missing_column_count" class="asset-row__missing">
+                缺失 {{ asset.missing_column_count }}
+              </span>
               <span v-if="asset.sensitive_tag_count" class="asset-row__sensitive">
                 敏感 {{ asset.sensitive_tag_count }}
               </span>
@@ -125,7 +128,12 @@
             </dl>
           </header>
           <div class="detail__columns">
-            <p class="smallcaps detail__section">列卡片 COLUMNS</p>
+            <p class="smallcaps detail__section">
+              列卡片 COLUMNS
+              <span v-if="detail.missing_column_count" class="detail__missingcount">
+                · 上游缺失 {{ detail.missing_column_count }} 列（软保留）
+              </span>
+            </p>
             <ul class="detail__collen">
               <li v-for="column in detailColumns" :key="column.id" class="detail__col">
                 <ColumnChip
@@ -133,6 +141,8 @@
                   :type="column.inferred_type"
                   :confidence="column.confidence"
                   :source="column.inference_source"
+                  :sync-status="column.sync_status"
+                  :detected-change="column.detected_change"
                 />
                 <span class="detail__datatype mono">{{ column.data_type }}</span>
                 <TagStamp
@@ -374,6 +384,14 @@ onMounted(async () => {
 }
 .asset-row__sensitive {
   color: var(--brick);
+}
+.asset-row__missing {
+  color: var(--gold);
+}
+.detail__missingcount {
+  color: var(--brick);
+  font-size: 9px;
+  letter-spacing: 0.04em;
 }
 .list__foot {
   display: flex;

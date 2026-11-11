@@ -99,6 +99,22 @@ def overview(db: Session) -> dict:
         )
         or 0
     )
+    missing_columns = (
+        db.scalar(
+            select(func.count())
+            .select_from(AssetColumn)
+            .where(AssetColumn.sync_status == "missing")
+        )
+        or 0
+    )
+    newly_added_columns = (
+        db.scalar(
+            select(func.count())
+            .select_from(AssetColumn)
+            .where(AssetColumn.detected_change == "added")
+        )
+        or 0
+    )
     last_completed = db.scalars(
         select(IngestJob)
         .where(IngestJob.status == IngestJobStatus.COMPLETED.value)
@@ -120,6 +136,8 @@ def overview(db: Session) -> dict:
         "coverage": round(profiled_columns / total_columns, 3) if total_columns else 0.0,
         "sample_assets": sample_assets,
         "manual_columns": manual_columns,
+        "missing_columns": missing_columns,
+        "newly_added_columns": newly_added_columns,
         "jobs": {
             status.value: sum(1 for job in jobs if job.status == status.value)
             for status in IngestJobStatus

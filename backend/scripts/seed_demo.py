@@ -69,17 +69,45 @@ def _ddl(schema: str, table: str, columns: list[dict]) -> str:
 
 
 def seed_sample_tables() -> None:
-    """在 schema `sample` 里建 5 张真实样例表并灌 300 行（幂等）。"""
+    """在 schema `sample` 里建 5 张真实样例表并灌 300 行（幂等）。
+
+    上游漂移（UPSTREAM_DRIFT）会改变物理表结构：已存在的旧结构表需要重建，
+    重建只影响 sample 物理表，目录（asset/asset_column）保持上一版，等采集识别。
+    """
     catalog = catalog_fixtures.build_catalog()
     schema = settings.sample_schema
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
         for table_name, payload in catalog["sample_tables"].items():
+            expected_cols = [column["name"] for column in payload["columns"]]
+            existing_cols = [
+                row[0]
+                for row in conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = :schema AND table_name = :table "
+                        "ORDER BY ordinal_position"
+                    ),
+                    {"schema": schema, "table": table_name},
+                ).all()
+            ]
+            structure_drift = existing_cols and existing_cols != expected_cols
             conn.execute(text(_ddl(schema, table_name, payload["columns"])))
-            existing = conn.execute(text(f'SELECT count(*) FROM "{schema}"."{table_name}"')).scalar()
-            if existing and existing >= len(payload["rows"]):
+            existing = conn.execute(
+                text(f'SELECT count(*) FROM "{schema}"."{table_name}"')
+            ).scalar()
+            if existing and existing >= len(payload["rows"]) and not structure_drift:
                 _skipped("SampleTable", table_name)
                 continue
+            if structure_drift:
+                # 旧结构表（如客户编号下线/退货金额上线）无法直接 INSERT，按新结构重建
+                conn.execute(text(f'DROP TABLE "{schema}"."{table_name}"'))
+                conn.execute(text(_ddl(schema, table_name, payload["columns"])))
+                print(
+                    f"SEED_REBUILT entity=SampleTable key={table_name} "
+                    f"reason=upstream_structure_drift",
+                    flush=True,
+                )
             conn.execute(text(f'TRUNCATE "{schema}"."{table_name}"'))
             column_names = [f'"{column["name"]}"' for column in payload["columns"]]
             placeholders = ", ".join(f":c{index}" for index in range(len(column_names)))

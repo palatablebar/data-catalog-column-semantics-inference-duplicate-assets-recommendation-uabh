@@ -115,6 +115,9 @@ def list_assets(
                 "updated_at": iso(asset.updated_at),
                 "sensitive_tag_count": sensitive_count,
                 "typed_column_count": sum(1 for column in asset.columns if column.inferred_type),
+                "missing_column_count": sum(
+                    1 for column in asset.columns if column.sync_status == "missing"
+                ),
                 "columns_preview": columns,
             }
         )
@@ -153,6 +156,12 @@ def get_asset(db: Session, asset_id: str) -> dict:
         "is_active": asset.is_active,
         "updated_at": iso(asset.updated_at),
         "columns": columns,
+        "missing_column_count": sum(
+            1 for column in asset.columns if column.sync_status == "missing"
+        ),
+        "active_column_count": sum(
+            1 for column in asset.columns if column.sync_status != "missing"
+        ),
         "sensitive_tag_count": sum(
             1
             for column in columns
@@ -181,6 +190,7 @@ def export_rows(db: Session) -> list[list[str]]:
                     "",
                     "",
                     "",
+                    "",
                 ]
             )
             continue
@@ -198,6 +208,7 @@ def export_rows(db: Session) -> list[list[str]]:
                     column.data_type,
                     column.inferred_type or "",
                     "; ".join(tag["tag_name"] for tag in tags),
+                    column.sync_status,
                 ]
             )
     return rows
@@ -205,4 +216,4 @@ def export_rows(db: Session) -> list[list[str]]:
 
 def layer_export_header() -> list[str]:
     return ["asset_key", "layer", "domain", "owner", "source_kind", "row_count", "column_name",
-            "data_type", "inferred_type", "tags"]
+            "data_type", "inferred_type", "tags", "sync_status"]

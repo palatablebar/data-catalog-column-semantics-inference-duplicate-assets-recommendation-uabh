@@ -15,7 +15,7 @@ export async function runIngest() {
   const { data } = await http.post('/ingest/jobs', {
     job_name: '样例表列统计采集',
     connection_name: 'pg-catmap-sample',
-    scope: '5 张样例数据表 · 48 列',
+    scope: '5 张样例数据表 · 两阶段列变化采集',
   })
   return data as IngestJob
 }

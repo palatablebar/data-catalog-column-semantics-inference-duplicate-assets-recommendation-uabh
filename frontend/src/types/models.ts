@@ -33,6 +33,8 @@ export interface ColumnItem {
   inferred_type: ColumnSemanticType | null
   confidence: number
   inference_source: 'auto' | 'manual' | null
+  sync_status?: 'active' | 'missing'
+  detected_change?: 'added' | 'missing' | null
   evidence?: string[]
   candidates?: { type: string; score: number }[]
   sample_values?: (string | null)[]
@@ -69,11 +71,13 @@ export interface AssetListItem extends AssetBrief {
   updated_at?: string | null
   sensitive_tag_count?: number
   typed_column_count?: number
+  missing_column_count?: number
   columns_preview?: ColumnItem[]
 }
 
 export interface AssetDetail extends AssetListItem {
   columns: ColumnItem[]
+  active_column_count?: number
 }
 
 export interface Facets {
@@ -133,13 +137,50 @@ export interface DiffRow {
   similarity: number
 }
 
+export interface IngestColumnChange {
+  column_name: string
+  data_type: string
+  nullable?: boolean
+  ordinal?: number
+}
+
+export interface IngestTableReport {
+  table_name: string
+  asset_key: string
+  status: 'readable' | 'unreadable'
+  row_count: number | null
+  upstream_column_count: number | null
+  catalog_column_count: number
+  added: IngestColumnChange[]
+  missing: IngestColumnChange[]
+  unchanged: string[]
+  failure_reason: string | null
+}
+
+export interface IngestJobStats {
+  mode?: string
+  changes_applied?: boolean
+  duration_ms?: number
+  tables_synced?: number
+  rows_scanned?: number
+  columns_profiled?: number
+  tables_total?: number
+  tables_readable?: number
+  tables_unreadable?: number
+  columns_added?: number
+  columns_missing?: number
+  columns_unchanged?: number
+  table_reports?: IngestTableReport[]
+  [key: string]: unknown
+}
+
 export interface IngestJob {
   id: string
   job_name: string
   connection_name: string
   scope: string
   status: 'queued' | 'running' | 'completed' | 'failed'
-  stats: Record<string, number | string>
+  stats: IngestJobStats
   error_code: string | null
   error_message: string | null
   triggered_by: string

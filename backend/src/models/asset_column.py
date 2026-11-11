@@ -30,6 +30,10 @@ class AssetColumn(Base):
     inference_source: Mapped[str | None] = mapped_column(String(12), nullable=True)
     evidence: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     candidates: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # 采集生命周期：active=上游在册；missing=上游已删除，软标记保留（人工纠正/标签/证据不丢）
+    sync_status: Mapped[str] = mapped_column(String(12), nullable=False, default="active", index=True)
+    # 最近一次成功采集相对上一版的变化：added=新增列；空串=无变化（成功采集后会清除旧标记）
+    detected_change: Mapped[str | None] = mapped_column(String(12), nullable=True)
     profiled_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()

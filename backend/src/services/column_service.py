@@ -29,6 +29,8 @@ def _column_item(column: AssetColumn, asset: Asset, tags: list[dict]) -> dict:
         "inferred_type": column.inferred_type,
         "confidence": round(column.confidence or 0.0, 3),
         "inference_source": column.inference_source,
+        "sync_status": column.sync_status,
+        "detected_change": column.detected_change,
         "evidence": column.evidence or [],
         "candidates": column.candidates or [],
         "sample_values": (column.sample_values or [])[:5],

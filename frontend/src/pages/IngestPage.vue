@@ -3,7 +3,7 @@
     <PageHeader
       title="采集任务"
       eyebrow="05 / INGEST LOG"
-      subtitle="Celery worker 读取 schema sample 的 5 张样例表，逐列统计空值率 / 基数 / 长度分布并写入列统计，供语义推断使用。"
+      subtitle="两阶段采集：先对 5 张样例表形成列变化（新增/缺失/未读取）与失败原因，整批可读后才在单事务内替换目录；任一表读不到则整批失败、沿用上一版。"
     >
       <template #actions>
         <button
@@ -31,21 +31,19 @@
         </p>
       </div>
       <div class="card ink-panel">
-        <p class="smallcaps">样例表 SAMPLE TABLES</p>
-        <p class="card__value numeric">{{ overview?.sample_assets ?? 0 }}</p>
-        <p class="card__hint mono">每表 300 行 · 共 1500 行</p>
+        <p class="smallcaps">上游缺失列 MISSING</p>
+        <p class="card__value numeric card__value--alert">{{ overview?.missing_columns ?? 0 }}</p>
+        <p class="card__hint mono">软标记保留 · 不参与采样</p>
+      </div>
+      <div class="card ink-panel">
+        <p class="smallcaps">本次新增列 ADDED</p>
+        <p class="card__value numeric card__value--ok">{{ overview?.newly_added_columns ?? 0 }}</p>
+        <p class="card__hint mono">已建档并进入检索</p>
       </div>
       <div class="card ink-panel">
         <p class="smallcaps">人工纠正 MANUAL</p>
         <p class="card__value numeric">{{ overview?.manual_columns ?? 0 }}</p>
         <p class="card__hint mono">inference_source = manual</p>
-      </div>
-      <div class="card ink-panel">
-        <p class="smallcaps">最近完成 LAST DONE</p>
-        <p class="card__value card__value--sm mono">
-          {{ overview?.last_completed ? shortTime(overview.last_completed.finished_at) : '—' }}
-        </p>
-        <p class="card__hint mono">{{ overview?.last_completed?.job_name ?? '暂无完成记录' }}</p>
       </div>
     </section>
 
@@ -87,14 +85,24 @@
             <div><dt>开始</dt><dd class="mono">{{ shortTime(detail.started_at) }}</dd></div>
             <div><dt>结束</dt><dd class="mono">{{ shortTime(detail.finished_at) }}</dd></div>
           </dl>
+
+          <div v-if="hasTableReports" class="jobdetail__changes">
+            <TableChangesPanel :reports="tableReports" :summary="detail.stats" />
+          </div>
+
           <p class="smallcaps jobdetail__label">采集统计 STATS</p>
           <dl class="jobdetail__stats">
-            <div v-for="(value, key) in detail.stats" :key="key">
+            <div v-for="(value, key) in scalarStats" :key="key">
               <dt class="mono">{{ key }}</dt>
               <dd class="numeric">{{ value }}</dd>
             </div>
           </dl>
-          <p v-if="detail.error_message" class="jobdetail__error mono">{{ detail.error_code }} · {{ detail.error_message }}</p>
+          <p v-if="detail.error_message" class="jobdetail__error mono">
+            {{ detail.error_code }} · {{ detail.error_message }}
+          </p>
+          <p v-if="detail.status === 'failed' && hasTableReports" class="jobdetail__keep mono">
+            本批未生效，目录保留上一版
+          </p>
         </template>
       </aside>
     </div>
@@ -102,15 +110,16 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import PageHeader from '../components/common/PageHeader.vue'
 import ErrorNotice from '../components/common/ErrorNotice.vue'
 import PermissionHint from '../components/common/PermissionHint.vue'
 import JobStatusTag from '../components/catalog/JobStatusTag.vue'
+import TableChangesPanel from '../components/catalog/TableChangesPanel.vue'
 import { fetchIngestOverview, fetchJobs, runIngest } from '../api/ingest'
 import { useJobPolling } from '../hooks/useJobPolling'
 import { usePermission } from '../hooks/usePermission'
-import type { IngestJob } from '../types/models'
+import type { IngestJob, IngestTableReport } from '../types/models'
 import { percent, shortTime } from '../utils/format'
 
 const perm = usePermission()
@@ -121,6 +130,16 @@ const selectedId = ref('')
 const detail = ref<IngestJob | null>(null)
 const error = ref('')
 const running = ref(false)
+
+const tableReports = computed<IngestTableReport[]>(() => detail.value?.stats?.table_reports ?? [])
+const hasTableReports = computed(() => tableReports.value.length > 0)
+// 表格化统计只展示标量字段，逐表报告交给变化面板
+const scalarStats = computed<Record<string, unknown>>(() => {
+  const stats = detail.value?.stats ?? {}
+  return Object.fromEntries(
+    Object.entries(stats).filter(([, value]) => value !== null && typeof value !== 'object'),
+  )
+})
 const { poll } = useJobPolling((job) => {
   detail.value = job
   if (job.status === 'completed' || job.status === 'failed') {
@@ -189,10 +208,26 @@ onMounted(loadAll)
   font-size: 15px;
   padding-top: 8px;
 }
+.card__value--alert {
+  color: var(--brick);
+}
+.card__value--ok {
+  color: var(--moss);
+}
 .card__hint {
   margin-top: 3px;
   font-size: 9.5px;
   color: var(--ink-faint);
+}
+.jobdetail__changes {
+  margin: 12px 0;
+}
+.jobdetail__keep {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--gold);
+  border: 1px dashed var(--gold);
+  padding: 6px 8px;
 }
 .ingest__grid {
   display: grid;

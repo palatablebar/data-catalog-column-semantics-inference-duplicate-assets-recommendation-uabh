@@ -60,6 +60,28 @@ class IngestJobStatus(StrEnum):
     FAILED = "failed"
 
 
+class ColumnSyncStatus(StrEnum):
+    """列在最新一版目录中的采集状态：正常在册 / 上游已缺失（软标记保留，不删除）。"""
+
+    ACTIVE = "active"
+    MISSING = "missing"
+
+
+class ColumnChangeType(StrEnum):
+    """单次采集相对上一版目录的列变化类型（写入任务报告，不落列）。"""
+
+    ADDED = "added"
+    MISSING = "missing"
+    UNCHANGED = "unchanged"
+
+
+class TableReadStatus(StrEnum):
+    """单张样例表在一次采集中的读取状态。"""
+
+    READABLE = "readable"
+    UNREADABLE = "unreadable"
+
+
 class PairStatus(StrEnum):
     RECOMMENDED = "recommended"
     DISMISSED = "dismissed"

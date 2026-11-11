@@ -29,14 +29,29 @@ def table_row_count(conn: Connection, schema: str, table: str) -> int:
 
 
 def column_names(conn: Connection, schema: str, table: str) -> list[str]:
+    return [column["name"] for column in table_columns(conn, schema, table)]
+
+
+def table_columns(conn: Connection, schema: str, table: str) -> list[dict[str, Any]]:
+    """information_schema 列结构快照：名称 / 物理类型 / 是否可空（按 ordinal 排序）。"""
     rows = conn.execute(
         text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = :schema AND table_name = :table ORDER BY ordinal_position"
+            "SELECT column_name, data_type, is_nullable, ordinal_position "
+            "FROM information_schema.columns "
+            "WHERE table_schema = :schema AND table_name = :table "
+            "ORDER BY ordinal_position"
         ),
         {"schema": schema, "table": table},
     ).all()
-    return [row[0] for row in rows]
+    return [
+        {
+            "name": row[0],
+            "data_type": row[1] or "text",
+            "nullable": (row[2] or "YES").upper() == "YES",
+            "ordinal": int(row[3]),
+        }
+        for row in rows
+    ]
 
 
 def profile_column(

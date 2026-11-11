@@ -58,7 +58,7 @@
               v-for="column in items"
               :key="column.id"
               class="column-row"
-              :class="{ 'is-selected': selected?.id === column.id }"
+              :class="{ 'is-selected': selected?.id === column.id, 'is-missing': column.sync_status === 'missing' }"
               @click="selectColumn(column)"
             >
               <td>
@@ -67,6 +67,8 @@
                   :type="column.inferred_type"
                   :confidence="column.confidence"
                   :source="column.inference_source"
+                  :sync-status="column.sync_status"
+                  :detected-change="column.detected_change"
                 />
               </td>
               <td class="mono cell-asset">{{ column.asset?.asset_key }}</td>
@@ -97,6 +99,8 @@
                 :type="selected.inferred_type"
                 :confidence="selected.confidence"
                 :source="selected.inference_source"
+                :sync-status="selected.sync_status"
+                :detected-change="selected.detected_change"
               />
               <ConfidenceMeter :value="selected.confidence" :type="selected.inferred_type" />
             </div>
@@ -368,6 +372,10 @@ onMounted(async () => {
 }
 .column-row {
   cursor: pointer;
+}
+.column-row.is-missing {
+  opacity: 0.7;
+  background: color-mix(in oklch, var(--brick-wash) 28%, transparent);
 }
 .tablewrap__foot {
   display: flex;
